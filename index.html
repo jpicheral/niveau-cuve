@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Niveau de cuve & Débit</title>
+<title>Cuve arrosage</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
@@ -91,9 +91,8 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Niveau de cuve & Débit</h1>
-  <div class="subtitle">Données en direct depuis ThingSpeak</div>
-
+  <h1>Cuve arrosage</h1>
+  
   <div class="panel">
     <iframe
       src="https://thingspeak.mathworks.com/channels/3442376/widgets/1286573"
@@ -130,8 +129,6 @@
     <canvas id="chart"></canvas>
     <div class="hint">Molette / pincement : zoom · Ctrl + glisser (ou deux doigts) : déplacer · Double-clic : réinitialiser</div>
   </div>
-
-  <footer>Mis à jour automatiquement — dérivée calculée localement à partir des points bruts</footer>
 </div>
 
 <script>
