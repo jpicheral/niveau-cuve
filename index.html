@@ -46,6 +46,7 @@
     flex-wrap: wrap;
     gap: 10px;
     align-items: center;
+    margin-top: 18px;
     margin-bottom: 16px;
   }
   select, button {
@@ -87,6 +88,17 @@
     display: none;
   }
   footer { text-align: center; color: var(--muted); font-size: 0.75rem; margin-top: 30px; }
+  .widget-scale-wrapper {
+    width: 100%;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    margin-bottom: 18px;
+  }
+  .widget-scale-wrapper iframe {
+    transform-origin: top center;
+    flex-shrink: 0;
+  }
 </style>
 </head>
 <body>
@@ -94,14 +106,21 @@
   <h1>Cuve arrosage</h1>
   
   <div class="panel">
-    <iframe
-      src="https://thingspeak.mathworks.com/channels/3442376/widgets/1286573"
-      style="width:100%; border:none; height:260px; border-radius:8px; margin-bottom:18px; background:#1a2236;"
-      loading="lazy">
-    </iframe>
+    <div class="widget-scale-wrapper" id="widgetWrapper">
+      <iframe
+        id="tsWidget"
+        src="https://thingspeak.mathworks.com/channels/3442376/widgets/1286573"
+        style="width:450px; height:260px; border:none; border-radius:8px; background:#1a2236;"
+        loading="lazy">
+      </iframe>
+    </div>
   </div>
 
   <div class="panel">
+    <div class="error" id="errorBox"></div>
+    <canvas id="chart"></canvas>
+    <div class="hint">Molette / pincement : zoom · Ctrl + glisser (ou deux doigts) : déplacer · Double-clic : réinitialiser</div>
+
     <div class="toolbar">
       <select id="rangeSelect">
         <option value="1">Dernier jour</option>
@@ -124,10 +143,6 @@
         <div class="value" id="lastDebit">—</div>
       </div>
     </div>
-
-    <div class="error" id="errorBox"></div>
-    <canvas id="chart"></canvas>
-    <div class="hint">Molette / pincement : zoom · Ctrl + glisser (ou deux doigts) : déplacer · Double-clic : réinitialiser</div>
   </div>
 </div>
 
@@ -144,6 +159,21 @@ const AUTO_REFRESH_MS = 5 * 60 * 1000; // 0 pour désactiver le rafraîchissemen
 
 let chart;
 let currentRawData = [];
+
+// Redimensionne et centre le widget ThingSpeak selon la largeur disponible
+function scaleWidget() {
+  const wrapper = document.getElementById("widgetWrapper");
+  const iframe = document.getElementById("tsWidget");
+  if (!wrapper || !iframe) return;
+  const nativeWidth = 450;
+  const nativeHeight = 260;
+  const scale = Math.min(1, wrapper.clientWidth / nativeWidth);
+  iframe.style.transform = `scale(${scale})`;
+  wrapper.style.height = (nativeHeight * scale) + "px";
+}
+window.addEventListener("resize", scaleWidget);
+window.addEventListener("load", scaleWidget);
+scaleWidget();
 
 function buildUrl(days) {
   let url = `https://api.thingspeak.com/channels/${CHANNEL_ID}/fields/${FIELD_NUM}.json?`;
@@ -284,7 +314,7 @@ function updateChart(niveauPoints, debitPoints) {
       },
     },
     plugins: {
-      legend: { labels: { color: "#e8ecf4" } },
+      legend: { display: false },
       zoom: {
         pan: { enabled: true, mode: "x", modifierKey: "ctrl" },
         zoom: {
