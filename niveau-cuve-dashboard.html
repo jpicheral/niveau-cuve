@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Niveau de cuve & Débit</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel: #161d2e;
+    --border: #2a3348;
+    --text: #e8ecf4;
+    --muted: #8b93a7;
+    --niveau: #4dabf7;
+    --debit: #f77676;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px 16px 60px;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1 {
+    font-size: 1.4rem;
+    font-weight: 600;
+    margin: 0 0 4px;
+  }
+  .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 24px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 18px;
+  }
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  select, button {
+    background: #1e2740;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 12px;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  button:hover, select:hover { border-color: #445; }
+  .stat-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+  .stat {
+    flex: 1;
+    min-width: 140px;
+    background: #1a2236;
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .stat .label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .stat .value { font-size: 1.3rem; font-weight: 600; margin-top: 2px; }
+  .stat.niveau .value { color: var(--niveau); }
+  .stat.debit .value { color: var(--debit); }
+  canvas { max-height: 440px; }
+  .hint { color: var(--muted); font-size: 0.78rem; margin-top: 10px; }
+  .error {
+    color: #ff8383;
+    background: #2a1620;
+    border: 1px solid #4a2530;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    display: none;
+  }
+  footer { text-align: center; color: var(--muted); font-size: 0.75rem; margin-top: 30px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Niveau de cuve & Débit</h1>
+  <div class="subtitle">Données en direct depuis ThingSpeak</div>
+
+  <div class="panel">
+    <iframe
+      src="https://thingspeak.mathworks.com/channels/3442376/widgets/1286573"
+      style="width:100%; border:none; height:260px; border-radius:8px; margin-bottom:18px; background:#1a2236;"
+      loading="lazy">
+    </iframe>
+  </div>
+
+  <div class="panel">
+    <div class="toolbar">
+      <select id="rangeSelect">
+        <option value="1">Dernier jour</option>
+        <option value="7" selected>7 derniers jours</option>
+        <option value="30">30 derniers jours</option>
+        <option value="0">Tout l'historique (max 8000 pts)</option>
+      </select>
+      <button id="refreshBtn">Rafraîchir</button>
+      <button id="resetZoomBtn">Réinitialiser le zoom</button>
+      <span class="hint" id="statusText"></span>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat niveau">
+        <div class="label">Dernier niveau</div>
+        <div class="value" id="lastNiveau">—</div>
+      </div>
+      <div class="stat debit">
+        <div class="label">Débit instantané</div>
+        <div class="value" id="lastDebit">—</div>
+      </div>
+    </div>
+
+    <div class="error" id="errorBox"></div>
+    <canvas id="chart"></canvas>
+    <div class="hint">Molette / pincement : zoom · Ctrl + glisser (ou deux doigts) : déplacer · Double-clic : réinitialiser</div>
+  </div>
+
+  <footer>Mis à jour automatiquement — dérivée calculée localement à partir des points bruts</footer>
+</div>
+
+<script>
+/* ========= CONFIG — à adapter ========= */
+const CHANNEL_ID   = "XXXXXX";        // ton Channel ID ThingSpeak
+const FIELD_NUM    = 1;               // numéro du field contenant le niveau
+const READ_API_KEY = "";              // laisser vide si le channel est public
+const NIVEAU_UNIT  = "%";             // unité affichée pour le niveau (%, cm, L...)
+const DEBIT_UNIT   = "L/h";           // unité affichée pour le débit dérivé
+const DEBIT_FACTOR = 120;             // facteur de conversion (niveau brut -> L/h) appliqué à la dérivée
+const AUTO_REFRESH_MS = 5 * 60 * 1000; // 0 pour désactiver le rafraîchissement auto
+/* ======================================= */
+
+let chart;
+let currentRawData = [];
+
+function buildUrl(days) {
+  let url = `https://api.thingspeak.com/channels/${CHANNEL_ID}/fields/${FIELD_NUM}.json?`;
+  const params = [];
+  if (days && days > 0) {
+    params.push(`days=${days}`);
+  } else {
+    params.push(`results=8000`);
+  }
+  if (READ_API_KEY) params.push(`api_key=${READ_API_KEY}`);
+  return url + params.join("&");
+}
+
+// Calcule la dérivée (débit) à partir de la série brute [{x: Date, y: valeur}]
+function computeDerivative(points) {
+  const derivative = [];
+  for (let i = 1; i < points.length; i++) {
+    const dtMs = points[i].x - points[i - 1].x;
+    if (dtMs <= 0) continue;
+    const dv = points[i].y - points[i - 1].y;
+    const dtHours = dtMs / 3_600_000;
+    const rate = (dv / dtHours) * DEBIT_FACTOR;
+    // point placé au milieu de l'intervalle pour un alignement visuel correct
+    const midTime = new Date((points[i].x.getTime() + points[i - 1].x.getTime()) / 2);
+    derivative.push({ x: midTime, y: rate });
+  }
+  return derivative;
+}
+
+function setStatus(msg) {
+  document.getElementById("statusText").textContent = msg;
+}
+
+function showError(msg) {
+  const box = document.getElementById("errorBox");
+  if (msg) {
+    box.textContent = msg;
+    box.style.display = "block";
+  } else {
+    box.style.display = "none";
+  }
+}
+
+async function loadData() {
+  const days = parseInt(document.getElementById("rangeSelect").value, 10);
+  setStatus("Chargement...");
+  showError(null);
+  try {
+    const res = await fetch(buildUrl(days));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const fieldKey = `field${FIELD_NUM}`;
+    const feeds = (json.feeds || []).filter(f => f[fieldKey] !== null && f[fieldKey] !== undefined && f[fieldKey] !== "");
+
+    if (feeds.length < 2) {
+      showError("Pas assez de points sur cette période pour tracer une courbe.");
+      setStatus("");
+      return;
+    }
+
+    const niveauPoints = feeds.map(f => ({
+      x: new Date(f.created_at),
+      y: parseFloat(f[fieldKey])
+    }));
+
+    const debitPoints = computeDerivative(niveauPoints);
+    currentRawData = { niveauPoints, debitPoints };
+
+    updateChart(niveauPoints, debitPoints);
+    updateStats(niveauPoints, debitPoints);
+    setStatus(`Dernière mise à jour : ${new Date().toLocaleTimeString("fr-FR")} · ${feeds.length} points`);
+  } catch (err) {
+    console.error(err);
+    showError("Impossible de récupérer les données depuis ThingSpeak. Vérifie le Channel ID et que le canal est public (ou fournis une Read API Key).");
+    setStatus("");
+  }
+}
+
+function updateStats(niveauPoints, debitPoints) {
+  const lastN = niveauPoints[niveauPoints.length - 1];
+  const lastD = debitPoints[debitPoints.length - 1];
+  document.getElementById("lastNiveau").textContent = lastN ? `${lastN.y.toFixed(1)} ${NIVEAU_UNIT}` : "—";
+  document.getElementById("lastDebit").textContent = lastD ? `${lastD.y >= 0 ? "+" : ""}${lastD.y.toFixed(2)} ${DEBIT_UNIT}` : "—";
+}
+
+function updateChart(niveauPoints, debitPoints) {
+  const ctx = document.getElementById("chart").getContext("2d");
+
+  const data = {
+    datasets: [
+      {
+        label: `Niveau (${NIVEAU_UNIT})`,
+        data: niveauPoints,
+        borderColor: "#4dabf7",
+        backgroundColor: "#4dabf733",
+        yAxisID: "yNiveau",
+        pointRadius: 0,
+        borderWidth: 2,
+        tension: 0.15,
+      },
+      {
+        label: `Débit (${DEBIT_UNIT})`,
+        data: debitPoints,
+        borderColor: "#f77676",
+        backgroundColor: "#f7767633",
+        yAxisID: "yDebit",
+        pointRadius: 0,
+        borderWidth: 1.5,
+        tension: 0.15,
+      },
+    ],
+  };
+
+  const options = {
+    responsive: true,
+    animation: false,
+    interaction: { mode: "nearest", axis: "x", intersect: false },
+    scales: {
+      x: {
+        type: "time",
+        time: { tooltipFormat: "dd/MM/yyyy HH:mm" },
+        ticks: { color: "#8b93a7" },
+        grid: { color: "#2a334855" },
+      },
+      yNiveau: {
+        type: "linear",
+        position: "left",
+        title: { display: true, text: `Niveau (${NIVEAU_UNIT})`, color: "#4dabf7" },
+        ticks: { color: "#4dabf7" },
+        grid: { color: "#2a334855" },
+      },
+      yDebit: {
+        type: "linear",
+        position: "right",
+        title: { display: true, text: `Débit (${DEBIT_UNIT})`, color: "#f77676" },
+        ticks: { color: "#f77676" },
+        grid: { drawOnChartArea: false },
+      },
+    },
+    plugins: {
+      legend: { labels: { color: "#e8ecf4" } },
+      zoom: {
+        pan: { enabled: true, mode: "x", modifierKey: "ctrl" },
+        zoom: {
+          wheel: { enabled: true },
+          pinch: { enabled: true },
+          drag: { enabled: true, backgroundColor: "#4dabf733" },
+          mode: "x",
+        },
+      },
+    },
+    onDblClick: null,
+  };
+
+  if (chart) {
+    chart.data = data;
+    chart.options = options;
+    chart.update();
+  } else {
+    chart = new Chart(ctx, { type: "line", data, options });
+    document.getElementById("chart").ondblclick = () => chart.resetZoom();
+  }
+}
+
+document.getElementById("rangeSelect").addEventListener("change", loadData);
+document.getElementById("refreshBtn").addEventListener("click", loadData);
+document.getElementById("resetZoomBtn").addEventListener("click", () => chart && chart.resetZoom());
+
+loadData();
+if (AUTO_REFRESH_MS > 0) setInterval(loadData, AUTO_REFRESH_MS);
+</script>
+</body>
+</html>
